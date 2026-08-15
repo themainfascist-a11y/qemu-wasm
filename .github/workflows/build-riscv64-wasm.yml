@@ -1,0 +1,71 @@
+name: Build RV64 QEMU-Wasm
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-riscv64-wasm:
+    name: Build qemu-system-riscv64.wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Emscripten toolchain image
+        run: docker build --tag qemu-wasm-build .
+
+      - name: Build RV64 system emulator
+        run: |
+          mkdir -p "$RUNNER_TEMP/qemu-wasm-out"
+          docker run --rm \
+            --init \
+            -v "$GITHUB_WORKSPACE:/qemu:ro" \
+            -v "$RUNNER_TEMP/qemu-wasm-out:/out" \
+            qemu-wasm-build \
+            bash -lc '
+              set -euo pipefail
+              EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc --js-library=/build/node_modules/xterm-pty/emscripten-pty.js -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js"
+
+              emconfigure /qemu/configure \
+                --static \
+                --target-list=riscv64-softmmu \
+                --cpu=wasm32 \
+                --cross-prefix= \
+                --without-default-features \
+                --enable-system \
+                --with-coroutine=fiber \
+                --enable-virtfs \
+                --extra-cflags="$EXTRA_CFLAGS" \
+                --extra-cxxflags="$EXTRA_CFLAGS" \
+                --extra-ldflags="-sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,TTY,FS"
+
+              emmake make -j"$(nproc)" qemu-system-riscv64
+
+              cp /build/qemu-system-riscv64.js /out/
+              cp /build/qemu-system-riscv64.wasm /out/
+              cp /build/qemu-system-riscv64.worker.js /out/
+            '
+
+      - name: Verify artifacts
+        run: |
+          set -euo pipefail
+          ls -lh "$RUNNER_TEMP/qemu-wasm-out"
+          test -s "$RUNNER_TEMP/qemu-wasm-out/qemu-system-riscv64.js"
+          test -s "$RUNNER_TEMP/qemu-wasm-out/qemu-system-riscv64.wasm"
+          test -s "$RUNNER_TEMP/qemu-wasm-out/qemu-system-riscv64.worker.js"
+
+      - name: Upload RV64 WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-system-riscv64-wasm
+          path: ${{ runner.temp }}/qemu-wasm-out/
+          if-no-files-found: error
+          retention-days: 14
