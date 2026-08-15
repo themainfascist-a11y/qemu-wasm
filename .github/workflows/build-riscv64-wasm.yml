@@ -27,7 +27,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/qemu-wasm-out"
           docker run --rm \
             --init \
-            -v "$GITHUB_WORKSPACE:/qemu:ro" \
+            -v "$GITHUB_WORKSPACE:/qemu" \
             -v "$RUNNER_TEMP/qemu-wasm-out:/out" \
             qemu-wasm-build \
             bash -lc '
