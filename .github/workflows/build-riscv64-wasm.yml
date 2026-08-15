@@ -33,10 +33,9 @@ jobs:
             bash -lc '
               set -euo pipefail
 
-              # The Docker image exports Emscripten -s linker options in CFLAGS.
-              # Override those inherited variables so Meson does not pass linker
-              # settings to every compilation command.
-              EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE"
+              # Do not inherit the Docker image's Emscripten -s linker options
+              # into compilation commands.
+              EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -Wno-unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE"
               EXTRA_LDFLAGS="-L/build/target/lib -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc --js-library=/build/node_modules/xterm-pty/emscripten-pty.js -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js -sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,TTY,FS"
 
               export CFLAGS="$EXTRA_CFLAGS"
@@ -56,21 +55,24 @@ jobs:
                 --extra-cxxflags="$EXTRA_CFLAGS" \
                 --extra-ldflags="$EXTRA_LDFLAGS"
 
+              # QEMU's configure disables PIE for this toolchain and Meson then
+              # emits -fno-pie/-no-pie. Emscripten treats those as unused compile
+              # arguments, while QEMU enables -Werror. Remove them from the
+              # generated Ninja rules before building.
+              sed -i -E 's/[[:space:]]-fno-pie([[:space:]]|$)/ /g; s/[[:space:]]-no-pie([[:space:]]|$)/ /g' /build/build.ninja
+
               emmake make -j"$(nproc)" qemu-system-riscv64
 
               echo "Emscripten build outputs:"
               find /build -maxdepth 1 -type f -name "qemu-system-riscv64*" -printf "%f %s bytes\\n" | sort
 
-              # Meson/Emscripten may choose the executable basename or add
-              # .js/.wasm depending on the toolchain configuration. Locate the
-              # generated files instead of assuming a single output layout.
               JS=""
               WASM=""
               WORKER=""
               for candidate in /build/qemu-system-riscv64.js /build/qemu-system-riscv64; do
                 if [ -s "$candidate" ]; then JS="$candidate"; break; fi
               done
-              for candidate in /build/qemu-system-riscv64.wasm /build/qemu-system-riscv64.wasm.js; do
+              for candidate in /build/qemu-system-riscv64.wasm; do
                 if [ -s "$candidate" ]; then WASM="$candidate"; break; fi
               done
               for candidate in /build/qemu-system-riscv64.worker.js /build/qemu-system-riscv64.worker.mjs; do
