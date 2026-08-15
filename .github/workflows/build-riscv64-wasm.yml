@@ -30,8 +30,16 @@ jobs:
             -v "$GITHUB_WORKSPACE:/qemu" \
             -v "$RUNNER_TEMP/qemu-wasm-out:/out" \
             qemu-wasm-build \
-            bash -lc '
+            bash -c '
               set -euo pipefail
+
+              # Explicitly initialize the Emscripten SDK. Do not rely on the
+              # image's interactive/login-shell PATH setup; GitHub Actions runs
+              # this as a non-interactive shell.
+              source /emsdk/emsdk_env.sh
+              command -v emcc
+              command -v emconfigure
+              command -v emmake
 
               # Do not inherit the Docker image's Emscripten -s linker options
               # into compilation commands.
