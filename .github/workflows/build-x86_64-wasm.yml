@@ -39,8 +39,8 @@ jobs:
               command -v emmake
               emcc --version
 
-              EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -Wno-unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -sUSE_SDL=2"
-              EXTRA_LDFLAGS="-L/build/target/lib -sUSE_SDL=2 -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js -sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,TTY,FS"
+              EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -Wno-unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -sUSE_SDL=2 -sOFFSCREENCANVAS_SUPPORT=1"
+              EXTRA_LDFLAGS="-L/build/target/lib -sUSE_SDL=2 -sOFFSCREENCANVAS_SUPPORT=1 -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js -sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,TTY,FS"
 
               export CFLAGS="$EXTRA_CFLAGS"
               export CXXFLAGS="$EXTRA_CFLAGS"
@@ -71,9 +71,6 @@ jobs:
               cp /build/qemu-system-x86_64.js /out/qemu-system-x86_64.js
               cp /build/qemu-system-x86_64.wasm /out/qemu-system-x86_64.wasm
               if [ -s /build/qemu-system-x86_64.worker.js ]; then cp /build/qemu-system-x86_64.worker.js /out/; fi
-
-              mkdir -p /pack
-              docker_placeholder=true
             '
 
       - name: Build sample x86_64 guest image
@@ -99,7 +96,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/qemu-wasm-out/htdocs"
           cp examples/x86_64/src/htdocs/index.html "$RUNNER_TEMP/qemu-wasm-out/htdocs/"
           cp examples/x86_64/src/htdocs/module.js "$RUNNER_TEMP/qemu-wasm-out/htdocs/"
-          cp examples/x86_64/src/htdocs/module.js "$RUNNER_TEMP/qemu-wasm-out/htdocs/graphics-module.js"
           cp examples/x86_64/src/htdocs/vendor/xterm.css "$RUNNER_TEMP/qemu-wasm-out/htdocs/" 2>/dev/null || true
 
       - name: Verify artifacts
