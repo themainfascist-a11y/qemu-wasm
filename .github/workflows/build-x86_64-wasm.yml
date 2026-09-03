@@ -2,7 +2,7 @@ name: Build x86_64 QEMU-Wasm
 
 on:
   push:
-    branches: [master]
+    branches: [master, browser-graphics]
   pull_request:
   workflow_dispatch:
 
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-x86_64-wasm:
-    name: Build qemu-system-x86_64.wasm
+    name: Build qemu-system-x86_64 graphical WASM
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -33,14 +33,14 @@ jobs:
             qemu-wasm-build \
             bash -c '
               set -euo pipefail
-
               source /emsdk/emsdk_env.sh
               command -v emcc
               command -v emconfigure
               command -v emmake
+              emcc --version
 
-              EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -Wno-unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE"
-              EXTRA_LDFLAGS="-L/build/target/lib -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc --js-library=/build/node_modules/xterm-pty/emscripten-pty.js -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js -sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,TTY,FS"
+              EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -Wno-unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -sUSE_SDL=2 -sOFFSCREENCANVAS_SUPPORT=1"
+              EXTRA_LDFLAGS="-L/build/target/lib -sUSE_SDL=2 -sOFFSCREENCANVAS_SUPPORT=1 -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js -sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,TTY,FS"
 
               export CFLAGS="$EXTRA_CFLAGS"
               export CXXFLAGS="$EXTRA_CFLAGS"
@@ -53,57 +53,64 @@ jobs:
                 --cross-prefix= \
                 --without-default-features \
                 --enable-system \
+                --enable-sdl \
                 --with-coroutine=fiber \
                 --enable-virtfs \
                 --extra-cflags="$EXTRA_CFLAGS" \
                 --extra-cxxflags="$EXTRA_CFLAGS" \
                 --extra-ldflags="$EXTRA_LDFLAGS"
 
-              # Emscripten warns about these flags and QEMU treats warnings as
-              # errors in parts of the generated build rules.
               if [ -f /build/build.ninja ]; then
                 sed -i -E "s/[[:space:]]-fno-pie([[:space:]]|$)/ /g; s/[[:space:]]-no-pie([[:space:]]|$)/ /g" /build/build.ninja
               fi
 
               emmake make -j"$(nproc)" qemu-system-x86_64
 
-              echo "Emscripten build outputs:"
-              find /build -maxdepth 1 -type f -name "qemu-system-x86_64*" -printf "%f %s bytes\n" | sort
-
-              JS=""
-              WASM=""
-              WORKER=""
-              for candidate in /build/qemu-system-x86_64.js /build/qemu-system-x86_64; do
-                if [ -s "$candidate" ]; then JS="$candidate"; break; fi
-              done
-              for candidate in /build/qemu-system-x86_64.wasm; do
-                if [ -s "$candidate" ]; then WASM="$candidate"; break; fi
-              done
-              for candidate in /build/qemu-system-x86_64.worker.js /build/qemu-system-x86_64.worker.mjs; do
-                if [ -s "$candidate" ]; then WORKER="$candidate"; break; fi
-              done
-
-              test -n "$JS" || { echo "qemu-system-x86_64 JS output not found"; exit 1; }
-              test -n "$WASM" || { echo "qemu-system-x86_64 WASM output not found"; exit 1; }
-
-              cp "$JS" /out/qemu-system-x86_64.js
-              cp "$WASM" /out/qemu-system-x86_64.wasm
-              if [ -n "$WORKER" ]; then
-                cp "$WORKER" /out/qemu-system-x86_64.worker.js
-              fi
+              test -s /build/qemu-system-x86_64.js
+              test -s /build/qemu-system-x86_64.wasm
+              cp /build/qemu-system-x86_64.js /out/qemu-system-x86_64.js
+              cp /build/qemu-system-x86_64.wasm /out/qemu-system-x86_64.wasm
+              if [ -s /build/qemu-system-x86_64.worker.js ]; then cp /build/qemu-system-x86_64.worker.js /out/; fi
             '
+
+      - name: Build sample x86_64 guest image
+        run: docker build --output=type=local,dest="$RUNNER_TEMP/qemu-wasm-pack" ./examples/x86_64/image
+
+      - name: Package guest assets
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/qemu-wasm-pack/pc-bios"
+          cp pc-bios/bios-256k.bin "$RUNNER_TEMP/qemu-wasm-pack/pc-bios/"
+          cp pc-bios/vgabios-stdvga.bin "$RUNNER_TEMP/qemu-wasm-pack/pc-bios/"
+          cp pc-bios/kvmvapic.bin "$RUNNER_TEMP/qemu-wasm-pack/pc-bios/"
+          cp pc-bios/linuxboot_dma.bin "$RUNNER_TEMP/qemu-wasm-pack/pc-bios/"
+          docker run --rm \
+            -v "$RUNNER_TEMP/qemu-wasm-pack:/pack:ro" \
+            -v "$RUNNER_TEMP/qemu-wasm-out:/out" \
+            qemu-wasm-build \
+            bash -c '/emsdk/upstream/emscripten/tools/file_packager.py /out/qemu-system-x86_64.data --preload /pack > /out/load.js'
+
+      - name: Assemble browser demo
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/qemu-wasm-out/htdocs"
+          cp examples/x86_64/src/htdocs/index.html "$RUNNER_TEMP/qemu-wasm-out/htdocs/"
+          cp examples/x86_64/src/htdocs/module.js "$RUNNER_TEMP/qemu-wasm-out/htdocs/"
+          cp examples/x86_64/src/htdocs/vendor/xterm.css "$RUNNER_TEMP/qemu-wasm-out/htdocs/" 2>/dev/null || true
 
       - name: Verify artifacts
         run: |
           set -euo pipefail
-          ls -lh "$RUNNER_TEMP/qemu-wasm-out"
+          find "$RUNNER_TEMP/qemu-wasm-out" -maxdepth 2 -type f -printf '%P %s bytes\n' | sort
           test -s "$RUNNER_TEMP/qemu-wasm-out/qemu-system-x86_64.js"
           test -s "$RUNNER_TEMP/qemu-wasm-out/qemu-system-x86_64.wasm"
+          test -s "$RUNNER_TEMP/qemu-wasm-out/qemu-system-x86_64.data"
+          test -s "$RUNNER_TEMP/qemu-wasm-out/load.js"
 
       - name: Upload x86_64 WASM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-system-x86_64-wasm
+          name: qemu-system-x86_64-graphical-wasm
           path: ${{ runner.temp }}/qemu-wasm-out/
           if-no-files-found: error
           retention-days: 14
