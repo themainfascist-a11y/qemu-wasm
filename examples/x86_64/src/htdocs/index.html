@@ -1,38 +1,59 @@
-<html>
-  <head>
-    <title>QEMU on browser(x86_64)</title>
-    <link rel="stylesheet" href="./vendor/xterm.css" />
-  </head>
-  <body>
-    <div id="terminal"></div>
-    <script src="./load.js"></script>
-    <script type="module">
-      import 'https://unpkg.com/xterm@5.3.0/lib/xterm.js';
-      import 'https://unpkg.com/xterm-pty/index.js';
-      import './module.js'
-      import initEmscriptenModule from './out.js';
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>QEMU Wasm — x86_64 Graphics</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; width: 100%; height: 100%; background: #111; overflow: hidden; font-family: system-ui, sans-serif; }
+    #toolbar { position: fixed; z-index: 10; left: 0; right: 0; top: 0; height: 36px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #1b1b1b; border-bottom: 1px solid #333; box-sizing: border-box; }
+    #status { opacity: .75; font-size: 13px; }
+    #screen { position: absolute; inset: 37px 0 0; width: 100%; height: calc(100% - 37px); display: block; object-fit: contain; background: #000; }
+    #error { position: fixed; z-index: 20; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 80ch; padding: 18px; background: #241616; border: 1px solid #633; border-radius: 8px; white-space: pre-wrap; display: none; }
+  </style>
+</head>
+<body>
+  <div id="toolbar"><strong>QEMU Wasm</strong><span>x86_64 graphical guest</span><span id="status">Starting…</span></div>
+  <canvas id="canvas" tabindex="0"></canvas>
+  <pre id="error"></pre>
 
-      const xterm = new Terminal();
-      xterm.open(document.getElementById("terminal"));
+  <script src="./load.js"></script>
+  <script type="module">
+    import initEmscriptenModule from './out.js';
 
-      const { master, slave } = openpty();
+    const canvas = document.getElementById('canvas');
+    const status = document.getElementById('status');
+    const error = document.getElementById('error');
 
-      xterm.loadAddon(master);
+    // Emscripten's SDL2 backend targets this canvas. Keep the canvas focused so
+    // the SDL keyboard/mouse event path continues to work after boot.
+    const Module = {
+      canvas,
+      noInitialRun: false,
+      mainScriptUrlOrBlob: location.origin + location.pathname.replace(/\/[^/]*$/, '/') + 'out.js',
+      print: text => console.log(text),
+      printErr: text => console.error(text),
+    };
 
-      Module.pty = slave;
-      Module['mainScriptUrlOrBlob'] = location.origin + "/out.js";
-      (async () => {
-          const instance = await initEmscriptenModule(Module);
-          
-          var oldPoll = Module['TTY'].stream_ops.poll;
-          var pty = Module['pty'];
-          Module['TTY'].stream_ops.poll = function(stream, timeout){
-              if (!pty.readable) {
-                  return (pty.readable ? 1 : 0) | (pty.writable ? 4 : 0);
-              }
-              return oldPoll.call(stream, timeout);
-          }
-      })();
-    </script>
-  </body>
+    window.addEventListener('error', event => {
+      error.textContent = String(event.error || event.message || event);
+      error.style.display = 'block';
+      status.textContent = 'Error';
+    });
+
+    canvas.addEventListener('click', () => canvas.focus());
+
+    try {
+      await initEmscriptenModule(Module);
+      status.textContent = 'Running';
+      canvas.focus();
+    } catch (err) {
+      console.error(err);
+      error.textContent = String(err?.stack || err);
+      error.style.display = 'block';
+      status.textContent = 'Failed';
+    }
+  </script>
+</body>
 </html>
